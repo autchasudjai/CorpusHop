@@ -33,7 +33,7 @@ with chained triples:
 ```text
 t1 = (s1, r1, s2)
 t2 = (s2, r2, s3)
-t3 = (s3,  r3, s4)
+t3 = (s3, r3, s4)
 ```
 
 ### Compositional
