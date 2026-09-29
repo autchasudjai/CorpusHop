@@ -287,8 +287,8 @@ and constructs:
 
 ```text
 t1 = (s1, r1, s2)
-t2 = (s2, r2, X)
-t3 = (X,  r3, s3)
+t2 = (s2, r2, s3)
+t3 = (s3, r3, s4)
 ```
 
 ---
@@ -351,30 +351,6 @@ FAIL
 
 Selection continues until no valid candidate remains.
 
----
-
-## Question Validation
-
-For each selected triple chain, the pipeline generates three sub-question-answer pairs.
-
-The sub-question checks enforce the intended hop dependencies and prevent answer leakage.
-
-For Bridge:
-
-```text
-Q1 → answer s2
-Q2 uses s2 → answer X
-Q3 uses X  → answer s3
-```
-
-The expected answer entity must not already appear in its corresponding sub-question.
-
-After composing the final multi-hop question, an **LLM-as-judge** verifies that:
-
-1. the final question requires the intended three-hop reasoning chain, and
-2. the final answer correctly answers the generated question.
-
----
 
 ## Generated Outputs
 
@@ -402,20 +378,6 @@ Generated outputs are organized for:
 - **Leaflets** — medical leaflet corpus
 - **MuSiQue** — multi-hop QA corpus
 
----
-
-## Reproducibility Notes
-
-- Triple links use normalized entity strings.
-- Chunk-graph edges follow the required dependency direction.
-- Greedy selection uses the lowest degree-sum candidate.
-- Accepted paths are node-disjoint.
-- Graph degrees are recomputed as the live graph changes.
-- Generalized scripts avoid machine-specific absolute paths.
-- LLM execution is disabled by default in the notebooks to avoid accidental API usage.
-- Random runs are stored separately.
-
----
 
 ## Files
 
