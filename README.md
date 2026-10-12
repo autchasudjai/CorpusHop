@@ -1,16 +1,17 @@
 <div align="center">
 
-# CorpusHop
+# CorpusHop: Multi-Hop Question Generation for Corpus-Aware RAG Evaluation
 
-### Coverage-aware multi-hop question generation for corpus-aware RAG evaluation
+### Coverage-aware three-hop question generation for corpus-aware RAG evaluation
 
 ![Python](https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white)
 ![Jupyter](https://img.shields.io/badge/Jupyter-Notebook-F37626?logo=jupyter&logoColor=white)
 ![RAG](https://img.shields.io/badge/RAG-Evaluation-6C63FF)
 ![Multi-Hop QA](https://img.shields.io/badge/Multi--Hop-QA-0A7EA4)
 
-**CorpusHop** automatically constructs verified three-hop question-answer pairs from a target corpus.  
-It is designed to improve **corpus and topic coverage** when building evaluation sets for Retrieval-Augmented Generation (RAG).
+**CorpusHop** automatically constructs verified three-hop question-answer pairs from a target corpus.
+
+It is designed to improve **corpus coverage** and **topic coverage** when constructing evaluation sets for **Retrieval-Augmented Generation (RAG)** systems.
 
 </div>
 
@@ -18,17 +19,65 @@ It is designed to improve **corpus and topic coverage** when building evaluation
 
 ## Overview
 
-CorpusHop builds a directed graph over corpus chunks and repeatedly selects valid three-chunk reasoning paths with the **lowest degree-sum score**.
+**CorpusHop** is a corpus-aware framework for **multi-hop question generation** and **RAG evaluation**.
 
-It supports two three-hop configurations.
+Instead of repeatedly generating questions from a limited portion of a document collection, CorpusHop explicitly promotes broader coverage of the target corpus.
+
+The framework:
+
+- extracts relational triples from document chunks,
+- builds a directed chunk graph,
+- identifies valid three-hop reasoning paths,
+- selects paths using a greedy minimum degree-sum strategy,
+- generates three single-hop question-answer pairs,
+- composes them into a multi-hop question,
+- and verifies the generated question using rule-based filtering and an LLM judge.
+
+CorpusHop supports two three-hop reasoning configurations: **Bridge** and **Compositional**.
+
+---
+
+## CorpusHop Pipeline
+
+<div align="center">
+
+![CorpusHop Pipeline](corpushop_pipeline.png)
+
+</div>
+
+The complete pipeline consists of six main stages:
+
+1. **Data Processing**  
+   Split input documents into chunks.
+
+2. **Triple Extraction and Cleaning**  
+   Extract and clean subject-relation-object triples from each chunk.
+
+3. **Chunk Graph Construction**  
+   Build a directed chunk graph using tail-to-head entity matching.
+
+4. **Path Selection**  
+   Identify valid three-chunk paths and prioritize candidates using the minimum degree-sum score.
+
+5. **Question Generation**  
+   Generate three single-hop QA pairs and compose them into a final multi-hop question.
+
+6. **Question Filtering**  
+   Apply answer-leakage filtering and LLM-based verification for three-hop necessity and answer correctness.
+
+---
+
+## Reasoning Configurations
 
 ### Bridge
+
+Bridge questions follow a sequential three-hop chain:
 
 ```text
 A → B → C
 ```
 
-with chained triples:
+with relational triples:
 
 ```text
 t1 = (s1, r1, s2)
@@ -36,76 +85,54 @@ t2 = (s2, r2, s3)
 t3 = (s3, r3, s4)
 ```
 
+The answer from one reasoning step provides the entity required by the next step.
+
 ### Compositional
+
+Compositional questions combine two relations through a shared entity before continuing to the final reasoning step:
 
 ```text
 A → C ← B
 ```
 
-with:
+with relational triples:
 
 ```text
 t1 = (s1, r1, s2)
-t2 = (s4, r2, s2)
-t3 = (s2, r3, s3)
+t2 = (s3, r2, s2)
+t3 = (s2, r3, s4)
 ```
 
-Both `t1` and `t2` provide information required by `t3`.
+The first two relations connect through the shared entity `s2`, which is then used in the final reasoning step.
 
 ---
 
-## Pipeline
+## Greedy Path Selection
+
+For a valid three-chunk candidate path containing nodes `A`, `B`, and `C`, CorpusHop computes:
 
 ```text
-Raw corpus / chunks
-        │
-        ▼
-┌──────────────────────┐
-│  Triple Extraction   │
-│  extract_triples.py  │
-└──────────┬───────────┘
-           │
-           ▼
-  [Subject, Relation, Object]
-           │
-           ▼
-┌──────────────────────┐
-│ Directed Chunk Graph │
-│ tail → head matching │
-└──────────┬───────────┘
-           │
-           ▼
-┌────────────────────────────┐
-│ Greedy Path Selection      │
-│ min Σ degree(v)            │
-└──────────┬─────────────────┘
-           │
-           ▼
-┌────────────────────────────┐
-│ Generate 3 Sub-QA Pairs    │
-│ + Compose Final Question   │
-└──────────┬─────────────────┘
-           │
-           ▼
-┌────────────────────────────┐
-│ Validation + LLM-as-Judge  │
-└──────────┬─────────────────┘
-           │
-           ▼
-     Verified Multi-Hop QA
+Score(A, B, C) = degree(A) + degree(B) + degree(C)
 ```
 
-For candidate chunks `A`, `B`, and `C`:
+Node degrees are calculated from the undirected projection of the current chunk graph.
+
+CorpusHop greedily selects the valid candidate with the **lowest degree-sum score**.
+
+This strategy prioritizes low-degree nodes and avoids consuming highly connected nodes too early, helping preserve future candidate paths and improve corpus coverage.
+
+The graph is updated after every generation attempt:
 
 ```text
-Score(A,B,C) = degree(A) + degree(B) + degree(C)
+PASS
+└── save the verified QA pair
+    └── remove A, B, and C from the graph
+
+FAIL
+└── remove only the traversed path edges
 ```
 
-CorpusHop greedily selects the valid candidate with the **minimum degree-sum**.
-
-If a generated example passes verification, all three chunks are removed from the live graph, producing **node-disjoint accepted paths**.
-
-If generation or verification fails, only the two traversed edges are removed.
+Accepted paths are therefore **node-disjoint** with respect to their supporting chunks.
 
 ---
 
@@ -115,6 +142,7 @@ If generation or verification fails, only the two traversed edges are removed.
 CorpusHop/
 │
 ├── Multi-hop questions/
+│   │
 │   ├── CorpusHop_CS/
 │   │   ├── Bridge_Greedy.jsonl
 │   │   ├── Bridge_Random1.jsonl
@@ -149,6 +177,7 @@ CorpusHop/
 │
 ├── Bridge.ipynb
 ├── Compositional.ipynb
+├── corpushop_pipeline.png
 ├── example_chunks.jsonl
 ├── extract_triples.py
 └── README.md
@@ -179,13 +208,13 @@ Create a `.env` file in the repository root:
 OPENAI_API_KEY=your_api_key_here
 ```
 
-> Do not commit `.env` to GitHub.
+> Do not commit your `.env` file or API key to GitHub.
 
 ---
 
-## Step 1 — Extract Triples
+## Step 1 — Extract Relational Triples
 
-A small example corpus is included:
+A small example corpus is provided:
 
 ```text
 example_chunks.jsonl
@@ -236,7 +265,7 @@ node_id
 {"id": "doc-001", "topic": "science", "text": "Marie Curie discovered polonium."}
 ```
 
-### Extracted Output
+### Example Extracted Output
 
 ```json
 {
@@ -254,7 +283,7 @@ node_id
 }
 ```
 
-The output JSONL can be used directly by both generation notebooks.
+The extracted JSONL can then be used by the Bridge and Compositional generation notebooks.
 
 ---
 
@@ -266,7 +295,7 @@ Open:
 Bridge.ipynb
 ```
 
-Point the configuration to the extracted data:
+Configure the input and output paths:
 
 ```python
 INPUT_DATA = Path("./example_chunks_with_triples.jsonl")
@@ -277,13 +306,13 @@ RUN_GRAPH_BUILDING = True
 RUN_LLM_PIPELINE = True
 ```
 
-Bridge searches for:
+Bridge generation searches for paths of the form:
 
 ```text
 A → B → C
 ```
 
-and constructs:
+with:
 
 ```text
 t1 = (s1, r1, s2)
@@ -301,7 +330,7 @@ Open:
 Compositional.ipynb
 ```
 
-Use the same extracted dataset:
+Configure the same extracted dataset:
 
 ```python
 INPUT_DATA = Path("./example_chunks_with_triples.jsonl")
@@ -312,97 +341,117 @@ RUN_GRAPH_BUILDING = True
 RUN_LLM_PIPELINE = True
 ```
 
-Compositional searches for:
+Compositional generation searches for:
 
 ```text
 A → C ← B
 ```
 
-and constructs:
+with:
 
 ```text
 t1 = (s1, r1, s2)
-t2 = (s4, r2, s2)
-t3 = (s2, r3, s3)
+t2 = (s3, r2, s2)
+t3 = (s2, r3, s4)
 ```
 
 ---
 
-## Greedy Selection
+## Question Filtering
 
-For every valid candidate:
+Before LLM-based verification, CorpusHop applies an answer-leakage check.
 
-```text
-score = degree(A) + degree(B) + degree(C)
-```
+The answer entity of each generated sub-question must not appear explicitly in the corresponding question.
 
-The candidate with the **minimum degree-sum** is selected.
+The final multi-hop question is then evaluated by an LLM judge for:
 
-The live graph is updated after every attempt:
+- **three-hop necessity**
+- **answer correctness**
 
-```text
-PASS
-└── save the verified QA pair
-    └── remove A, B, and C
+If the question passes verification, its supporting chunks are removed from the current graph to prevent reuse.
 
-FAIL
-└── remove only the two traversed edges
-```
+If verification fails, only the traversed edges are removed so that the chunks can still participate in other candidate paths.
 
-Selection continues until no valid candidate remains.
+---
 
+## Generated Question Sets
 
-## Generated Outputs
+Generated outputs are provided for three document collections:
 
-Example output layout:
+- **MuSiQue**
+- **Dutch ZGT Leaflets**
+- **Computer Science handbooks**
+
+Example:
 
 ```text
 Multi-hop questions/
 └── CorpusHop_CS/
     ├── Bridge_Greedy.jsonl
     ├── Bridge_Random1.jsonl
+    ├── Bridge_Random2.jsonl
     ├── ...
     ├── Compositional_Greedy.jsonl
     └── Compositional_Random5.jsonl
 ```
 
-Random selection is repeated across multiple runs so its variation can be compared with greedy path selection.
+Random path selection is repeated across multiple runs to enable comparison with greedy path selection.
 
 ---
 
-## Included Corpora
+## Data Availability
 
-Generated outputs are organized for:
+This repository provides the CorpusHop generation code, prompts, example input data, and generated question sets.
 
-- **CS** — computer science handbook corpus
-- **Leaflets** — medical leaflet corpus
-- **MuSiQue** — multi-hop QA corpus
+The original source corpora are not redistributed in this repository. Users should obtain the corresponding source collections from their original providers where required.
 
+---
 
-## Files
+## Main Files
 
-| File | Purpose |
+| File | Description |
 |---|---|
 | `extract_triples.py` | Extract and clean subject-relation-object triples |
 | `Bridge.ipynb` | Generate Bridge-style three-hop QA pairs |
 | `Compositional.ipynb` | Generate Compositional-style three-hop QA pairs |
-| `example_chunks.jsonl` | Small example corpus for testing |
-| `Multi-hop questions/` | Generated greedy and random QA sets |
+| `example_chunks.jsonl` | Small example corpus for testing the pipeline |
+| `corpushop_pipeline.png` | Full CorpusHop pipeline |
+| `Multi-hop questions/` | Generated greedy and random multi-hop question sets |
 
 ---
 
-## Research
+## Research Paper
 
-**CorpusHop: Multi-Hop Question Generation for Corpus-Aware RAG Evaluation**
+### CorpusHop: Multi-Hop Question Generation for Corpus-Aware RAG Evaluation
 
-Authors:
+**Authors**
 
 - Autcha Sudjai
 - Pat Vatiwutipong
 - Wasin Faengrit
 - Thanapon Noraset
 
-Citation information can be added once the official proceedings entry is available.
+Official citation information will be added once the proceedings entry becomes available.
+
+---
+
+## Citation
+
+Citation information will be updated after publication.
+
+```bibtex
+@inproceedings{corpushop2026,
+  title     = {CorpusHop: Multi-Hop Question Generation for Corpus-Aware RAG Evaluation},
+  author    = {Sudjai, Autcha and Vatiwutipong, Pat and Faengrit, Wasin and Noraset, Thanapon},
+  year      = {2026}
+}
+```
+
+---
+
+## Keywords
+
+**CorpusHop**, **RAG evaluation**, **Retrieval-Augmented Generation**, **multi-hop question generation**, **multi-hop QA**, **corpus-aware RAG evaluation**, **corpus coverage**, **topic coverage**, **question generation**, **question-answering dataset construction**, **graph-based question generation**, **LLM evaluation**, **RAG benchmark**.
 
 ---
 
